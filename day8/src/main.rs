@@ -11,11 +11,11 @@ enum Instruction {
     Jump(i16)
 }
 
-struct Interpreter {
-    instructions: Vec<Instruction>,
+struct Interpreter<'a> {
+    instructions: &'a Vec<Instruction>,
     position: i16,
     accumulator: i16,
-    visited: Vec<i16>
+    visited: Vec<bool>
 }
 
 impl Instruction {
@@ -59,14 +59,15 @@ impl Instruction {
     }
 }
 
-impl Interpreter {
+impl<'a> Interpreter<'a> {
 
-    fn new(instructions: Vec<Instruction>) -> Interpreter {
+    fn new(instructions: &Vec<Instruction>) -> Interpreter {
+        let capacity = instructions.len();
         Interpreter {
             instructions: instructions,
             position: 0,
             accumulator: 0,
-            visited: Vec::new()
+            visited: vec![false; capacity]
         }
     }
 
@@ -78,7 +79,7 @@ impl Interpreter {
     }
 
     fn can_continue(&self) -> bool {
-        self.is_terminated() || self.visited.contains(&self.position)
+        self.is_terminated() || self.visited[self.position as usize]
     }
 
     fn is_terminated(&self) -> bool {
@@ -86,7 +87,7 @@ impl Interpreter {
     }
 
     fn execute_instruction(&mut self) {
-        self.visited.push(self.position);
+        self.visited[self.position as usize] = true;
 
         match self.instructions[self.position as usize] {
             Instruction::NoOp(_) => self.position += 1,
@@ -101,27 +102,35 @@ impl Interpreter {
 
 fn run_loop(path: &str) -> i16 {
     let instructions = Instruction::read(&path);
-    let mut interpreter = Interpreter::new(instructions.clone());
+    let mut interpreter = Interpreter::new(&instructions);
     interpreter.execute()
 }
 
 fn run_terminate(path: &str) -> i16 {
-    let instructions = Instruction::read(&path);
-    instructions.iter()
+    let mut instructions = Instruction::read(&path);
+
+    let invertable: Vec<usize> = instructions.iter()
         .enumerate()
-        .filter(|(_, instruction)| match instruction {
-            Instruction::NoOp(_) => true,
-            Instruction::Jump(_) => true,
-            _ => false
-        })
         .filter_map(|(pos, instruction)| {
-            let mut copy = instructions.clone();
-            copy[pos] = instruction.invert();
+            match instruction {
+                Instruction::NoOp(_) => Some(pos),
+                Instruction::Jump(_) => Some(pos),
+                _ => None
+            }
+        })
+        .collect();
 
-            let mut interpreter = Interpreter::new(copy);
+    invertable.into_iter()
+        .filter_map(|pos| {
+            instructions[pos] = instructions[pos].invert();
+
+            let mut interpreter = Interpreter::new(&instructions);
             let value = interpreter.execute();
+            let terminated = interpreter.is_terminated();
 
-            match interpreter.is_terminated() {
+            instructions[pos] = instructions[pos].invert();
+
+            match terminated {
                 true => Some(value),
                 false => None
             }
