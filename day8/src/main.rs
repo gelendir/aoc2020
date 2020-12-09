@@ -2,6 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::time::{Instant};
 
 #[derive(Debug, Clone)]
 enum Instruction {
@@ -98,15 +99,15 @@ impl Interpreter {
     }
 }
 
-fn main() {
-    let path = env::args().nth(1).expect("no path to file");
+fn run_loop(path: &str) -> i16 {
     let instructions = Instruction::read(&path);
-
     let mut interpreter = Interpreter::new(instructions.clone());
-    let value = interpreter.execute();
-    println!("looped value {}", value);
+    interpreter.execute()
+}
 
-    let value = instructions.iter()
+fn run_terminate(path: &str) -> i16 {
+    let instructions = Instruction::read(&path);
+    instructions.iter()
         .enumerate()
         .filter(|(_, instruction)| match instruction {
             Instruction::NoOp(_) => true,
@@ -126,7 +127,33 @@ fn main() {
             }
         })
         .next()
-        .expect("no interpretations terminated");
+        .expect("no interpretations terminated")
+}
 
-    println!("terminated value {}", value);
+fn main() {
+    let mode = env::args().nth(1).expect("no mode");
+    let path = env::args().nth(2).expect("no path to file");
+
+    match mode.as_str() {
+        "loop" => println!("loop value {}", run_loop(&path)),
+        "terminate" => println!("terminate value {}", run_terminate(&path)),
+        "benchmark" => {
+            let runs = 1000;
+            let total: u128 = (0..runs)
+                .map(|i| {
+                    let start = Instant::now();
+                    run_terminate(&path);
+                    let end = Instant::now();
+
+                    let nanos = end.duration_since(start).as_nanos();
+                    println!("run {} nanos {}", i, nanos);
+                    nanos
+                })
+                .sum();
+            
+            let average = total as f64 / runs as f64;
+            println!("average execution time: {} ns", average);
+        },
+        _ => {}
+    }
 }
