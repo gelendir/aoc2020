@@ -11,10 +11,16 @@ enum Instruction {
     Jump(i16)
 }
 
+struct Branch {
+    position: usize,
+    instruction: Instruction
+}
+
 struct Interpreter<'a> {
     instructions: &'a Vec<Instruction>,
-    position: i16,
+    position: usize,
     accumulator: i16,
+    branch: Option<Branch>,
     visited: Vec<bool>
 }
 
@@ -67,19 +73,50 @@ impl<'a> Interpreter<'a> {
             instructions: instructions,
             position: 0,
             accumulator: 0,
+            branch: None,
             visited: vec![false; capacity]
         }
     }
 
+    fn branch(&self) -> (i16, bool) {
+        let instruction = self.instructions[self.position].invert();
+
+        let mut interpreter = Interpreter {
+            instructions: &self.instructions,
+            position: self.position,
+            accumulator: self.accumulator,
+            branch: Some(Branch{
+                position: self.position,
+                instruction: instruction
+            }),
+            visited: self.visited.clone()
+        };
+
+        let result = interpreter.execute();
+        (result, interpreter.is_terminated())
+    }
+
     fn execute(&mut self) -> i16 {
-        while !self.can_continue() {
-            self.execute_instruction()
+        while self.can_continue() {
+            if self.branch.is_none() {
+                match self.instructions[self.position] {
+                    Instruction::Jump(_) | Instruction::NoOp(_) => {
+                        let (result, terminated) = self.branch();
+                        if terminated {
+                            return result
+                        }
+                    },
+                    _ => {}
+                }
+            }
+            self.execute_instruction();
         }
-        self.accumulator
+
+        return self.accumulator
     }
 
     fn can_continue(&self) -> bool {
-        self.is_terminated() || self.visited[self.position as usize]
+        ! (self.is_terminated() || self.visited[self.position])
     }
 
     fn is_terminated(&self) -> bool {
@@ -87,56 +124,31 @@ impl<'a> Interpreter<'a> {
     }
 
     fn execute_instruction(&mut self) {
-        self.visited[self.position as usize] = true;
+        self.visited[self.position] = true;
 
-        match self.instructions[self.position as usize] {
+        let instruction = match &self.branch {
+            Some(b) if b.position == self.position => &b.instruction,
+            _ => &self.instructions[self.position]
+        }; 
+
+        match instruction {
             Instruction::NoOp(_) => self.position += 1,
             Instruction::Accumulate(value) => {
                 self.accumulator += value;
                 self.position += 1
             } 
-            Instruction::Jump(value) => self.position += value
+            Instruction::Jump(value) => match value.is_positive() {
+                true => self.position += *value as usize,
+                false => self.position -= value.abs() as usize
+            }
         }
     }
 }
 
-fn run_loop(path: &str) -> i16 {
+fn run(path: &str) -> i16 {
     let instructions = Instruction::read(&path);
     let mut interpreter = Interpreter::new(&instructions);
     interpreter.execute()
-}
-
-fn run_terminate(path: &str) -> i16 {
-    let mut instructions = Instruction::read(&path);
-
-    let invertable: Vec<usize> = instructions.iter()
-        .enumerate()
-        .filter_map(|(pos, instruction)| {
-            match instruction {
-                Instruction::NoOp(_) => Some(pos),
-                Instruction::Jump(_) => Some(pos),
-                _ => None
-            }
-        })
-        .collect();
-
-    invertable.into_iter()
-        .filter_map(|pos| {
-            instructions[pos] = instructions[pos].invert();
-
-            let mut interpreter = Interpreter::new(&instructions);
-            let value = interpreter.execute();
-            let terminated = interpreter.is_terminated();
-
-            instructions[pos] = instructions[pos].invert();
-
-            match terminated {
-                true => Some(value),
-                false => None
-            }
-        })
-        .next()
-        .expect("no interpretations terminated")
 }
 
 fn main() {
@@ -144,14 +156,13 @@ fn main() {
     let path = env::args().nth(2).expect("no path to file");
 
     match mode.as_str() {
-        "loop" => println!("loop value {}", run_loop(&path)),
-        "terminate" => println!("terminate value {}", run_terminate(&path)),
+        "run" => println!("terminate value {}", run(&path)),
         "benchmark" => {
             let runs = 1000;
             let total: u128 = (0..runs)
                 .map(|i| {
                     let start = Instant::now();
-                    run_terminate(&path);
+                    run(&path);
                     let end = Instant::now();
 
                     let nanos = end.duration_since(start).as_nanos();
